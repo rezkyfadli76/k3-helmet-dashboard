@@ -1,0 +1,939 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>IoT CO & CH4 Dashboard</title>
+
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.umd.min.js"></script>
+
+  <style>
+    :root{
+      --bg1:#0b2a4a;
+      --bg2:#0a2340;
+      --muted:#9bb3c9;
+      --text:#eaf2ff;
+
+      --red:#ff6a5f;   /* CO */
+      --blue:#3da0ff;  /* CH4 */
+
+      --green:#26d07c;
+      --yellow:#ffd166;
+      --down:#ff5a5a;
+
+      --ringTrack:#183d5f;
+      --shadow: 0 12px 28px rgba(0,0,0,.25);
+    }
+
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background: linear-gradient(180deg,var(--bg1),var(--bg2));
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color:var(--text);
+    }
+
+    .wrap{max-width:980px;margin:0 auto;padding:18px;}
+    .panel{
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      padding: 18px 18px 10px;
+    }
+
+    .topRow{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:14px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .title{
+      font-weight:800;
+      opacity:.95;
+      letter-spacing:.2px;
+      min-width: 80px;
+    }
+
+    .metricRow{
+      display:flex;
+      gap:18px;
+      align-items:center;
+      flex-wrap: wrap;
+    }
+
+    .metric{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width: 260px;
+    }
+
+    .dot{width:8px;height:8px;border-radius:50%;opacity:.95;}
+    .dot.co{ background: var(--red); }
+    .dot.ch4{ background: var(--blue); }
+
+    .metricMain{display:flex;flex-direction:column;gap:3px;}
+    .metricVal{font-size:22px;font-weight:900;letter-spacing:.2px;}
+    .metricLbl{font-size:12px;color:var(--muted);font-weight:800;}
+
+    .badge{
+      font-size: 12px;
+      font-weight: 950;
+      padding: 6px 10px;
+      border-radius: 12px;
+      line-height: 1;
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      margin-left: 8px;
+      white-space:nowrap;
+    }
+    .badge.up{ background: rgba(38,208,124,.18); color: var(--green); }
+    .badge.down{ background: rgba(255,90,90,.18); color: var(--down); }
+
+    .state{
+      display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+      margin-top: 4px;
+    }
+    .chip{
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.04);
+      font-size: 12px;
+      font-weight: 900;
+      color: var(--muted);
+    }
+    .chip.ok{ color: var(--green); background: rgba(38,208,124,.12); }
+    .chip.warn{ color: var(--yellow); background: rgba(255,209,102,.12); }
+    .chip.danger{ color: var(--down); background: rgba(255,90,90,.12); }
+    .chip.off{ color: rgba(255,255,255,.65); background: rgba(255,255,255,.06); }
+
+    .chartWrap{position: relative;padding: 6px 6px 0;}
+
+    .ringRow{
+      display:flex;
+      justify-content:center;
+      gap: 30px;
+      padding: 12px 8px 12px;
+      flex-wrap: wrap;
+    }
+
+    .ringCard{
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap: 6px;
+      min-width: 220px;
+    }
+
+    .ring{
+      width: 150px;
+      height: 150px;
+      position: relative;
+    }
+    .ring svg{ width:100%; height:100%; }
+
+    .ring .center{
+      position:absolute;
+      inset:0;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      text-align:center;
+      gap:2px;
+    }
+    .ring .num{font-size:28px;font-weight:950;letter-spacing:.2px;}
+    .ring .unit{font-size:12px;color:var(--muted);font-weight:900;margin-top:-2px;}
+    .ring .lbl{font-size:12px;color:var(--muted);font-weight:950;margin-top:6px;}
+
+    .cfg{
+      margin-top: 10px;
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items:center;
+      padding: 8px 10px;
+      border-radius: 14px;
+      background: rgba(0,0,0,.18);
+      border: 1px solid rgba(255,255,255,.06);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .cfg input{
+      width: 360px;
+      max-width: 100%;
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.04);
+      color: var(--text);
+      outline:none;
+    }
+    .pill{
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.04);
+      cursor: default;
+      font-weight: 800;
+    }
+    .btn{
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.06);
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 900;
+    }
+    .btn:hover{ background: rgba(255,255,255,.10); }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <div class="topRow">
+        <div>
+          <div class="title">Trend</div>
+          <div class="state">
+            <span class="chip off" id="devState">DEVICE: OFFLINE</span>
+            <span class="chip off" id="alarmState">ALARM: -</span>
+          </div>
+        </div>
+
+        <div class="metricRow">
+          <div class="metric">
+            <div class="dot co"></div>
+            <div class="metricMain">
+              <div>
+                <span class="metricVal" id="coTop">0,00</span>
+                <span class="badge up" id="coBadge">0% ↑</span>
+              </div>
+              <div class="metricLbl">CO (MQ7) • axis kiri</div>
+            </div>
+          </div>
+
+          <div class="metric">
+            <div class="dot ch4"></div>
+            <div class="metricMain">
+              <div>
+                <span class="metricVal" id="ch4Top">0,00</span>
+                <span class="badge up" id="ch4Badge">0% ↑</span>
+              </div>
+              <div class="metricLbl">CH4 (MQ4) • axis kanan</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chartWrap">
+        <canvas id="trendChart" height="190"></canvas>
+      </div>
+
+      <div class="ringRow">
+        <div class="ringCard"><div class="ring" id="ringCO"></div></div>
+        <div class="ringCard"><div class="ring" id="ringCH4"></div></div>
+      </div>
+
+      <div class="cfg">
+        <span class="pill">Broker: wss://broker.emqx.io:8084/mqtt</span>
+        <span class="pill" id="connState">Connecting...</span>
+
+        <button class="btn" id="btnClear">Reset Rekaman</button>
+        <button class="btn" id="btnAuto">AutoScale: ON</button>
+        <button class="btn" id="btnZoomReset">Reset Zoom</button>
+        <button class="btn" id="btnSound">Sound: OFF</button>
+
+        <div style="flex:1"></div>
+        <span>Topic:</span>
+        <input id="topic" value="k3helmet/esp32_01/telemetry"/>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // =============================
+  // CONFIG
+  // =============================
+  const BROKER_WSS = "wss://broker.emqx.io:8084/mqtt";
+
+  // ring scale
+  const MAX_CO  = 60;
+  const MAX_CH4 = 1500;
+
+  // record
+  const MAX_POINTS = 5000;
+  const KEEP_HOURS = 24;
+  const STORE_KEY = "mq_dashboard_continuous_v3";
+
+  // Threshold sama seperti ESP32
+  const CO_AMAN_MAX   = 25.0;
+  const CO_SIAGA_MAX  = 50.0;
+  const CH4_AMAN_MAX  = 500.0;
+  const CH4_SIAGA_MAX = 1200.0;
+
+  // Device offline timeout
+  const OFFLINE_MS = 15000;
+
+  // =============================
+  // STATE
+  // =============================
+  let coNow  = 0;
+  let ch4Now = 0;
+
+  let coBase  = null;
+  let ch4Base = null;
+
+  let labels = [];
+  let coArr  = [];
+  let ch4Arr = [];
+
+  let lastSeenMs = 0;
+
+  let autoScaleOn = true;
+  let soundOn = false;
+
+  // =============================
+  // HELPERS
+  // =============================
+  const fmt = (n, d=2) => {
+    if (!Number.isFinite(n)) return "-";
+    return n.toLocaleString("id-ID", {minimumFractionDigits:d, maximumFractionDigits:d});
+  };
+
+  function clamp01(x){ return Math.max(0, Math.min(1, x)); }
+
+  function pctFromBase(now, base){
+    if (!Number.isFinite(base) || base === 0) return 0;
+    return ((now - base) / base) * 100;
+  }
+
+  function tsLabel(ms){
+    const d = new Date(ms);
+    return d.toLocaleTimeString("id-ID", {hour:"2-digit", minute:"2-digit", second:"2-digit"});
+  }
+
+  function setChip(el, text, mode){
+    el.textContent = text;
+    el.className = "chip " + mode;
+  }
+
+  function loadStore(){
+    try{
+      const raw = localStorage.getItem(STORE_KEY);
+      if(!raw) return { points: [], base: null };
+      const obj = JSON.parse(raw);
+      if(!obj.points) obj.points = [];
+      return obj;
+    }catch(e){
+      return { points: [], base: null };
+    }
+  }
+
+  function saveStore(store){
+    localStorage.setItem(STORE_KEY, JSON.stringify(store));
+  }
+
+  function trimPoints(points){
+    const now = Date.now();
+    const minTs = now - (KEEP_HOURS * 3600 * 1000);
+    while(points.length && points[0].t < minTs) points.shift();
+    if(points.length > MAX_POINTS) points.splice(0, points.length - MAX_POINTS);
+    return points;
+  }
+
+  // =============================
+  // LEVELS (threshold)
+  // =============================
+  function levelCO(v){
+    if (v < CO_AMAN_MAX) return "AMAN";
+    if (v <= CO_SIAGA_MAX) return "SIAGA";
+    return "BAHAYA";
+  }
+  function levelCH4(v){
+    if (v < CH4_AMAN_MAX) return "AMAN";
+    if (v <= CH4_SIAGA_MAX) return "SIAGA";
+    return "BAHAYA";
+  }
+  function overallAlarm(coLv, ch4Lv){
+    if (coLv === "BAHAYA" || ch4Lv === "BAHAYA") return "BAHAYA";
+    if (coLv === "SIAGA"  || ch4Lv === "SIAGA")  return "SIAGA";
+    return "AMAN";
+  }
+
+  // =============================
+  // WEB BUZZER PATTERN (SAMA PERSIS DENGAN ESP32)
+  // =============================
+  const BUZZ = {
+    TREND_N_CO: 3,
+    TREND_N_CH4: 3,
+    TREND_DELTA_CO: 1.0,
+    TREND_DELTA_CH4: 20.0,
+  };
+
+  const PAT_SILENT = [{freq:0, durMs:1000, gapMs:0}];
+
+  const PAT_TREND_SIAGA_CO  = [{freq:900, durMs:70, gapMs:120},{freq:0, durMs:10, gapMs:520}];
+  const PAT_TREND_SIAGA_CH4 = [{freq:650, durMs:70, gapMs:120},{freq:0, durMs:10, gapMs:520}];
+
+  const PAT_CO_SIAGA  = [{freq:1100, durMs:120, gapMs:80},{freq:1350, durMs:120, gapMs:420}];
+  const PAT_CH4_SIAGA = [{freq:750, durMs:90, gapMs:70},{freq:850, durMs:90, gapMs:70},{freq:950, durMs:90, gapMs:450}];
+
+  const PAT_CO_BAHAYA  = [{freq:1700, durMs:120, gapMs:40},{freq:900, durMs:120, gapMs:40},{freq:1700, durMs:120, gapMs:40},{freq:900, durMs:120, gapMs:260}];
+  const PAT_CH4_BAHAYA = [{freq:1200, durMs:180, gapMs:60},{freq:1000, durMs:180, gapMs:60},{freq:800, durMs:180, gapMs:300}];
+  const PAT_BOTH_BAHAYA = [
+    {freq:1400, durMs:120, gapMs:80},{freq:1400, durMs:120, gapMs:80},{freq:1400, durMs:120, gapMs:220},
+    {freq:1400, durMs:300, gapMs:80},{freq:1400, durMs:300, gapMs:80},{freq:1400, durMs:300, gapMs:220},
+    {freq:1400, durMs:120, gapMs:80},{freq:1400, durMs:120, gapMs:80},{freq:1400, durMs:120, gapMs:650}
+  ];
+
+  // audio engine
+  let audioCtx = null;
+  let osc = null;
+  let gain = null;
+
+  let curPat = PAT_SILENT;
+  let patIdx = 0;
+  let toneOn = false;
+  let patTimer = null;
+
+  function ensureAudio(){
+    if(!audioCtx){
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      osc = audioCtx.createOscillator();
+      gain = audioCtx.createGain();
+      osc.type = "sine";
+      gain.gain.value = 0.0; // mute awal
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+    }
+  }
+
+  function setTone(freq){
+    if(!osc || !gain) return;
+    if(freq > 0){
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+    }else{
+      gain.gain.setValueAtTime(0.0, audioCtx.currentTime);
+    }
+  }
+
+  function stopPattern(){
+    if(patTimer) clearTimeout(patTimer);
+    patTimer = null;
+    curPat = PAT_SILENT;
+    patIdx = 0;
+    toneOn = false;
+    if(audioCtx && gain) gain.gain.value = 0.0;
+  }
+
+  function setPattern(pat){
+    curPat = pat || PAT_SILENT;
+    patIdx = 0;
+    toneOn = false;
+    if(patTimer) clearTimeout(patTimer);
+    patTimer = null;
+    patternTick();
+  }
+
+  function patternTick(){
+    if(!soundOn){ stopPattern(); return; }
+    ensureAudio();
+
+    const s = curPat[patIdx];
+
+    if(!toneOn){
+      setTone(s.freq);
+      toneOn = true;
+      patTimer = setTimeout(patternTick, s.durMs);
+    }else{
+      setTone(0);
+      toneOn = false;
+      patTimer = setTimeout(patternTick, s.gapMs);
+
+      patIdx++;
+      if(patIdx >= curPat.length) patIdx = 0;
+    }
+  }
+
+  // Trend detector sama seperti ESP32
+  let prevCO = null, prevCH4 = null;
+  let streakCO = 0, streakCH4 = 0;
+
+  function trendUpCO(co){
+    if(prevCO === null){ prevCO = co; streakCO = 0; return false; }
+    const d = co - prevCO;
+    if(d > BUZZ.TREND_DELTA_CO) streakCO++;
+    else streakCO = 0;
+    prevCO = co;
+    return streakCO >= BUZZ.TREND_N_CO;
+  }
+
+  function trendUpCH4(ch4){
+    if(prevCH4 === null){ prevCH4 = ch4; streakCH4 = 0; return false; }
+    const d = ch4 - prevCH4;
+    if(d > BUZZ.TREND_DELTA_CH4) streakCH4++;
+    else streakCH4 = 0;
+    prevCH4 = ch4;
+    return streakCH4 >= BUZZ.TREND_N_CH4;
+  }
+
+  // applyBuzzer sama persis dengan ESP32
+  let lastMode = -1;
+  function applyWebBuzzer(coLv, ch4Lv, coTrendWarn, ch4TrendWarn){
+    let mode = 0;
+
+    if (coLv === "BAHAYA" && ch4Lv === "BAHAYA") mode = 7;
+    else if (coLv === "BAHAYA") mode = 5;
+    else if (ch4Lv === "BAHAYA") mode = 6;
+    else if (coLv === "SIAGA" && !coTrendWarn) mode = 3;
+    else if (ch4Lv === "SIAGA" && !ch4TrendWarn) mode = 4;
+    else if (coLv === "SIAGA" && coTrendWarn) mode = 1;
+    else if (ch4Lv === "SIAGA" && ch4TrendWarn) mode = 2;
+    else mode = 0;
+
+    if(mode === lastMode) return;
+    lastMode = mode;
+
+    switch(mode){
+      case 0: setPattern(PAT_SILENT); break;
+      case 1: setPattern(PAT_TREND_SIAGA_CO); break;
+      case 2: setPattern(PAT_TREND_SIAGA_CH4); break;
+      case 3: setPattern(PAT_CO_SIAGA); break;
+      case 4: setPattern(PAT_CH4_SIAGA); break;
+      case 5: setPattern(PAT_CO_BAHAYA); break;
+      case 6: setPattern(PAT_CH4_BAHAYA); break;
+      case 7: setPattern(PAT_BOTH_BAHAYA); break;
+    }
+  }
+
+  // =============================
+  // RINGS
+  // =============================
+  function makeRing(el, value, maxValue, label, colorVar){
+    const size = 150;
+    const r = 56;
+    const cx = 75, cy = 75;
+    const C = 2*Math.PI*r;
+    const pct = clamp01(value / maxValue);
+    const dash = (C*pct).toFixed(2);
+    const gap  = (C - C*pct).toFixed(2);
+
+    const color = getComputedStyle(document.documentElement).getPropertyValue(colorVar).trim();
+    const track = getComputedStyle(document.documentElement).getPropertyValue('--ringTrack').trim();
+
+    el.innerHTML = `
+      <svg viewBox="0 0 ${size} ${size}">
+        <circle cx="${cx}" cy="${cy}" r="${r}" stroke="${track}" stroke-width="12" fill="none"/>
+        <circle cx="${cx}" cy="${cy}" r="${r}" stroke="${color}" stroke-width="12" fill="none"
+                stroke-linecap="round"
+                stroke-dasharray="${dash} ${gap}"
+                transform="rotate(-90 ${cx} ${cy})"/>
+      </svg>
+      <div class="center">
+        <div class="num">${Math.round(value)}</div>
+        <div class="unit">ppm</div>
+        <div class="lbl">${label}</div>
+      </div>
+    `;
+  }
+
+  function renderRings(){
+    makeRing(document.getElementById("ringCO"),  coNow,  MAX_CO,  "CO (MQ7)",  "--red");
+    makeRing(document.getElementById("ringCH4"), ch4Now, MAX_CH4, "CH4 (MQ4)", "--blue");
+  }
+
+  // =============================
+  // CHART (DUAL AXIS + ZOOM)
+  // =============================
+  const ctx = document.getElementById("trendChart").getContext("2d");
+
+  function makeFill(color, top=0.30, bottom=0.0){
+    const g = ctx.createLinearGradient(0, 0, 0, 240);
+    const toRGBA = (hex, a) => {
+      const h = hex.replace("#","").trim();
+      const r = parseInt(h.slice(0,2),16);
+      const gg = parseInt(h.slice(2,4),16);
+      const b = parseInt(h.slice(4,6),16);
+      return `rgba(${r},${gg},${b},${a})`;
+    };
+    g.addColorStop(0, toRGBA(color, top));
+    g.addColorStop(1, toRGBA(color, bottom));
+    return g;
+  }
+
+  const colorCO  = getComputedStyle(document.documentElement).getPropertyValue('--red').trim();
+  const colorCH4 = getComputedStyle(document.documentElement).getPropertyValue('--blue').trim();
+
+  const trendChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label:"CO",
+          data: coArr,
+          yAxisID: "yCO",
+          borderColor: colorCO,
+          backgroundColor: makeFill(colorCO, 0.30, 0.0),
+          fill: true,
+          tension: 0.35,
+          pointRadius: 0
+        },
+        {
+          label:"CH4",
+          data: ch4Arr,
+          yAxisID: "yCH4",
+          borderColor: colorCH4,
+          backgroundColor: makeFill(colorCH4, 0.20, 0.0),
+          fill: true,
+          tension: 0.35,
+          pointRadius: 0
+        }
+      ]
+    },
+    options:{
+      responsive:true,
+      animation:false,
+      plugins:{
+        legend:{ display:false },
+        tooltip:{ enabled:true },
+        zoom: {
+          pan: { enabled: true, mode: "x" },
+          zoom: {
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            mode: "x"
+          }
+        }
+      },
+      scales:{
+        x:{
+          grid:{ display:false },
+          ticks:{ color:"rgba(255,255,255,.55)", maxRotation:0 }
+        },
+        yCO:{
+          position:"left",
+          grid:{ color:"rgba(255,255,255,.08)" },
+          ticks:{ color:"rgba(255,255,255,.45)" }
+        },
+        yCH4:{
+          position:"right",
+          grid:{ drawOnChartArea:false },
+          ticks:{ color:"rgba(255,255,255,.45)" }
+        }
+      }
+    }
+  });
+
+  // =============================
+  // AUTOSCALE
+  // =============================
+  function applyAutoScale(){
+    if(!autoScaleOn){
+      trendChart.options.scales.yCO.min = 0;
+      trendChart.options.scales.yCO.max = MAX_CO;
+      trendChart.options.scales.yCH4.min = 0;
+      trendChart.options.scales.yCH4.max = MAX_CH4;
+      return;
+    }
+
+    const pad = (min, max) => {
+      const span = Math.max(1e-6, max - min);
+      return { min: min - span*0.12, max: max + span*0.12 };
+    };
+
+    if(coArr.length){
+      let mn = Math.min(...coArr);
+      let mx = Math.max(...coArr);
+      const p = pad(mn, mx);
+      trendChart.options.scales.yCO.min = Math.max(0, p.min);
+      trendChart.options.scales.yCO.max = Math.max(1, p.max);
+    }
+
+    if(ch4Arr.length){
+      let mn = Math.min(...ch4Arr);
+      let mx = Math.max(...ch4Arr);
+      const p = pad(mn, mx);
+      trendChart.options.scales.yCH4.min = Math.max(0, p.min);
+      trendChart.options.scales.yCH4.max = Math.max(1, p.max);
+    }
+  }
+
+  // =============================
+  // TOP UI (angka + badge + chip alarm)
+  // =============================
+  function renderTopWithAlarm(alarmLv){
+    document.getElementById("coTop").textContent  = fmt(coNow, 2);
+    document.getElementById("ch4Top").textContent = fmt(ch4Now, 2);
+
+    if (coBase === null && Number.isFinite(coNow))  coBase = coNow;
+    if (ch4Base === null && Number.isFinite(ch4Now)) ch4Base = ch4Now;
+
+    const coPct  = pctFromBase(coNow, coBase);
+    const ch4Pct = pctFromBase(ch4Now, ch4Base);
+
+    const coBadge  = document.getElementById("coBadge");
+    const ch4Badge = document.getElementById("ch4Badge");
+
+    if (coPct >= 0){
+      coBadge.className = "badge up";
+      coBadge.textContent = `${Math.abs(coPct).toFixed(0)}% ↑`;
+    } else {
+      coBadge.className = "badge down";
+      coBadge.textContent = `${Math.abs(coPct).toFixed(0)}% ↓`;
+    }
+
+    if (ch4Pct >= 0){
+      ch4Badge.className = "badge up";
+      ch4Badge.textContent = `${Math.abs(ch4Pct).toFixed(0)}% ↑`;
+    } else {
+      ch4Badge.className = "badge down";
+      ch4Badge.textContent = `${Math.abs(ch4Pct).toFixed(0)}% ↓`;
+    }
+
+    const alarmChip = document.getElementById("alarmState");
+    if (alarmLv === "AMAN") setChip(alarmChip, `ALARM: AMAN`, "ok");
+    else if (alarmLv === "SIAGA") setChip(alarmChip, `ALARM: SIAGA`, "warn");
+    else setChip(alarmChip, `ALARM: BAHAYA`, "danger");
+  }
+
+  // =============================
+  // DEVICE STATUS
+  // =============================
+  function renderDeviceStatus(){
+    const devChip = document.getElementById("devState");
+    const age = Date.now() - lastSeenMs;
+    if(lastSeenMs === 0 || age > OFFLINE_MS){
+      setChip(devChip, "DEVICE: OFFLINE", "off");
+    }else{
+      setChip(devChip, "DEVICE: ONLINE", "ok");
+    }
+  }
+  setInterval(renderDeviceStatus, 1000);
+
+  // =============================
+  // STORE + CHART RENDER
+  // =============================
+  function renderChartFromStore(){
+    const store = loadStore();
+    const points = trimPoints(store.points || []);
+
+    labels = points.map(p => tsLabel(p.t));
+    coArr  = points.map(p => p.co);
+    ch4Arr = points.map(p => p.ch4);
+
+    trendChart.data.labels = labels;
+    trendChart.data.datasets[0].data = coArr;
+    trendChart.data.datasets[1].data = ch4Arr;
+
+    if(store.base && coBase === null && ch4Base === null){
+      coBase = store.base.coBase ?? null;
+      ch4Base = store.base.ch4Base ?? null;
+    }
+
+    applyAutoScale();
+    trendChart.update();
+  }
+
+  function recordPoint(co, ch4){
+    const store = loadStore();
+
+    if(store.base == null){
+      store.base = { coBase: co, ch4Base: ch4 };
+      coBase = co;
+      ch4Base = ch4;
+    }
+
+    store.points.push({ t: Date.now(), co: co, ch4: ch4 });
+    trimPoints(store.points);
+    saveStore(store);
+  }
+
+  // =============================
+  // UPDATE FROM MQTT (STATUS + TREND + BUZZER)
+  // =============================
+  function updateTelemetry(obj){
+    const newCO  = Number(obj.co);
+    const newCH4 = Number(obj.ch4);
+    if (!Number.isFinite(newCO) || !Number.isFinite(newCH4)) return;
+
+    coNow = newCO;
+    ch4Now = newCH4;
+
+    lastSeenMs = Date.now();
+    renderDeviceStatus();
+
+    // rekam + chart
+    recordPoint(coNow, ch4Now);
+    renderChartFromStore();
+
+    // ===== Threshold dulu, baru trend (sama seperti ESP32 computeStatus) =====
+    const coTh  = levelCO(coNow);
+    const ch4Th = levelCH4(ch4Now);
+
+    let coFinal = coTh;
+    let ch4Final = ch4Th;
+
+    let coTrendWarn = false;
+    let ch4TrendWarn = false;
+
+    if (coTh !== "BAHAYA") {
+      const up = trendUpCO(coNow);
+      if (coTh === "AMAN" && up) { coFinal = "SIAGA"; coTrendWarn = true; }
+    } else {
+      prevCO = coNow; streakCO = 0;
+    }
+
+    if (ch4Th !== "BAHAYA") {
+      const up = trendUpCH4(ch4Now);
+      if (ch4Th === "AMAN" && up) { ch4Final = "SIAGA"; ch4TrendWarn = true; }
+    } else {
+      prevCH4 = ch4Now; streakCH4 = 0;
+    }
+
+    const alarmLv = overallAlarm(coFinal, ch4Final);
+
+    // top + ring
+    renderTopWithAlarm(alarmLv);
+    renderRings();
+
+    // bunyi sama seperti ESP32 (pattern engine)
+    applyWebBuzzer(coFinal, ch4Final, coTrendWarn, ch4TrendWarn);
+  }
+
+  // initial render
+  renderChartFromStore();
+  renderTopWithAlarm("AMAN");
+  renderRings();
+  renderDeviceStatus();
+
+  // =============================
+  // MQTT CONNECT
+  // =============================
+  const connState = document.getElementById("connState");
+  const topicInput = document.getElementById("topic");
+
+  const btnClear = document.getElementById("btnClear");
+  const btnAuto = document.getElementById("btnAuto");
+  const btnZoomReset = document.getElementById("btnZoomReset");
+  const btnSound = document.getElementById("btnSound");
+
+  let client = null;
+  let currentTopic = "";
+
+  function subscribe(t){
+    if (!client || !t) return;
+
+    if (currentTopic) client.unsubscribe(currentTopic);
+    currentTopic = t;
+
+    client.subscribe(currentTopic, (err)=>{
+      connState.textContent = err ? "Subscribe error" : "Subscribed ✅";
+      if (err) console.log("SUBSCRIBE ERROR:", err);
+      else console.log("SUBSCRIBED:", currentTopic);
+    });
+  }
+
+  function connect(){
+    client = mqtt.connect(BROKER_WSS, {
+      clientId: "web_" + Math.random().toString(16).slice(2),
+      clean: true,
+      reconnectPeriod: 1000
+    });
+
+    client.on("connect", ()=>{
+      connState.textContent = "Connected ✅";
+      console.log("CONNECTED to", BROKER_WSS);
+      subscribe(topicInput.value.trim());
+    });
+
+    client.on("reconnect", ()=> connState.textContent = "Reconnecting...");
+    client.on("offline",   ()=> connState.textContent = "Offline");
+    client.on("close",     ()=> connState.textContent = "Closed");
+
+    client.on("error", (e)=>{
+      connState.textContent = "Error";
+      console.log("MQTT ERROR:", e);
+    });
+
+    client.on("message", (topic, message)=>{
+      const raw = message.toString();
+      console.log("RX topic:", topic, "payload:", raw);
+
+      try{
+        updateTelemetry(JSON.parse(raw));
+      }catch(e){
+        const parts = raw.trim().split(/\s+/);
+        if (parts.length >= 2){
+          updateTelemetry({ co:Number(parts[0]), ch4:Number(parts[1]) });
+        }
+      }
+    });
+  }
+
+  topicInput.addEventListener("change", ()=> subscribe(topicInput.value.trim()));
+
+  btnClear.addEventListener("click", ()=>{
+    localStorage.removeItem(STORE_KEY);
+    coBase = null;
+    ch4Base = null;
+    lastSeenMs = 0;
+
+    labels = []; coArr = []; ch4Arr = [];
+    trendChart.data.labels = labels;
+    trendChart.data.datasets[0].data = coArr;
+    trendChart.data.datasets[1].data = ch4Arr;
+    applyAutoScale();
+    trendChart.update();
+
+    // reset trend & buzzer state
+    prevCO = null; prevCH4 = null;
+    streakCO = 0; streakCH4 = 0;
+    lastMode = -1;
+    stopPattern();
+
+    renderTopWithAlarm("AMAN");
+    renderRings();
+    renderDeviceStatus();
+    console.log("REKAMAN RESET");
+  });
+
+  btnAuto.addEventListener("click", ()=>{
+    autoScaleOn = !autoScaleOn;
+    btnAuto.textContent = "AutoScale: " + (autoScaleOn ? "ON" : "OFF");
+    applyAutoScale();
+    trendChart.update();
+  });
+
+  btnZoomReset.addEventListener("click", ()=>{
+    trendChart.resetZoom();
+  });
+
+  btnSound.addEventListener("click", ()=>{
+    soundOn = !soundOn;
+    btnSound.textContent = "Sound: " + (soundOn ? "ON" : "OFF");
+
+    if(soundOn){
+      ensureAudio();
+      patternTick(); // start current pattern
+    }else{
+      stopPattern();
+    }
+  });
+
+  connect();
+</script>
+</body>
+</html>
